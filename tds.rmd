@@ -1,0 +1,830 @@
+---
+title: TRAN5340M - Exploratory data analysis of NYC Taxi Data
+subtitle: 'Page Count: 12, Submission Date: 2020-05-29, Semester: 2, Academic Year: 201920'
+author:  'Jordan Vauls, 201364552, Lecturer - Robin Lovelace'
+affiliation: University of Leeds
+date: '`r Sys.Date()`'
+output: pdf_document
+number_sections: true
+fontsize: 4pt
+fig_caption: true
+toc: true
+geometry: margin=1cm
+always_allow_html: true
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE, error = FALSE, fig.height=3.5, fig.width=8, fig.align="center",cache=TRUE)
+```
+
+\newpage
+
+# Introduction
+Exploratory data analysis alludes to the method of performing starting inquiries about how to find designs, spot peculiarities, to testing_data_set the theory and check suspicions with the assistance of statistical summaries and graphical representations (Patil,2018). It's essential to have prior knowledge of the data we are looking to handle with the assistance taxi and limousine commission from where we obtained the data; We can understand the data we are using before getting into the depth of statistical analysis and model building.
+
+In this study, we will be visualising the original data from the NYC Taxi and Limousine Commission (TLC) of yellow cab taxi rides from 2016. Furthermore, we will engineer new features from the source data. We will add two external datasets which are composed of NYC Weather data from the Nation Weather Service Forecast Office from 2016 and routing data sourced from the OSRM package which allowed us to pull the theoretically fastest routes from the coordinates. We use these datasets to analyse and visualise the new features and the impact on the variable that we will be focusing on through this study trip_duration. We will tackle the problem as a classification problem and finish the analysis with an XGBoost model which will allow us to create basic predictions on the trip_duration based on the engineered variables.
+
+# Load libraries and helper functions
+
+We use the *multiplot* package which allows for plotting of multiple graphs on the same paragraph, courtesy of R Cookbooks (http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/) and a variety of libraries including ggplot2, XGBoost , leaflet and Lubridate (see rmd file for a full list of libraries).
+
+```{r, eval=FALSE}
+##### NO NEED TO USE THIS!
+#Combining all datasets - for reproducibility i created 1 csv file that can be loaded in.
+#DATA - TAXI
+taxi_jan <- read.csv("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\yellow_tripdata_2016-01.csv")
+taxi_feb <- read.csv("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\yellow_tripdata_2016-02.csv")
+taxi_march <- read.csv("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\yellow_tripdata_2016-03.csv")
+taxi_april <- read.csv ("FC:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\yellow_tripdata_2016-04.csv")
+taxi_may <- read.csv("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\yellow_tripdata_2016-05.csv")
+taxi_june <- read.csv("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\yellow_tripdata_2016-06.csv")
+taxi_jul <- read.csv("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\yellow_tripdata_2016-07.csv")
+taxi_aug <- read.csv("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\yellow_tripdata_2016-08.csv")
+taxi_sept <- read.csv("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\yellow_tripdata_2016-09.csv")
+taxi_oct <- read.csv ("FC:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\yellow_tripdata_2016-10.csv")
+taxi_nov <- read.csv("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\yellow_tripdata_2016-11.csv")
+taxi_dec <- read.csv("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\yellow_tripdata_2016-12.csv")
+
+##combining
+training_data_set.data <- rbind(taxi_jan, taxi_feb, taxi_march, taxi_april, taxi_may, taxi_june,taxi_jul,taxi_aug,taxi_sept,taxi_oct,taxi_nov,taxi_dec)
+##selecting the relavant collumns
+my_data %>% select(id, vendor_id,pickup_datetime,passenger_count,pickup_dropoff,store_and_fwd_flag, trip_duration)
+```
+
+```{r, cache=FALSE}
+library('ggplot2') # visualisation
+library('scales') # visualisation
+library('grid') # visualisation
+library('RColorBrewer') # visualisation
+library('corrplot') # visualisation
+library('alluvial') # visualisation
+library('dplyr') # data manipulation
+library('readr') # input/output
+library('data.table') # data manipulation
+library('tibble') # data wrangling
+library('tidyr') # data wrangling
+library('stringr') # string manipulation
+library('forcats') # factor manipulation
+library('lubridate') # date and time
+library('geosphere') # geospatial locations
+library('leaflet') # maps
+library('leaflet.extras') # maps
+library('maps') # maps
+library('xgboost') # modelling
+library('caret') # modelling
+```
+
+```{r}
+# Define multiple plot function
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
+# Data
+
+We use three datasets in our analysis, each of which is loaded into R studio as data frame which we can query. For reproducibility, we have decided to use a csv file rather than BigQuery or a SQL database to reduce time as using these types of databases takes a lot of time to pull such large queries.
+```{r, echo=TRUE}
+##Inserting the datasets which already for the sake of this analysis have been pre-processed.
+data_set <- read.csv("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\datanyctaxis.csv")
+data_set_weather <- read.csv("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\weather_data_nyc_centralpark_2016.csv")
+OSRMDAT <- as_tibble(fread("C:\\Users\\JordanLaptop\\Desktop\\NYCTaxiAnalysisTDS\\RoutesFromOSRM.csv"))
+```
+
+We have a look at the data sets using the *summary* and the *glimpse* we have a look at the variables within the dataset.
+
+```{r, include=FALSE, echo=TRUE}
+## checking the dataset. use this to talk about data collumns
+glimpse(data_set)
+```
+
+```{r, eval = FALSE}
+##checking further using sumarise.
+summary(data_set)
+```
+
+We have a look at the data sets using the summary and the glimpse we have a look at the variables within the dataset.
+
+- vendor_id is either a code of 1 or 2 these define the different vendors of yellow cab taxis.
+
+- pickup_datetime date and time pickup dropoff_datetime date and time of drop-off.
+
+- passenger_count passenger count of the taxi which will be between 1-9.
+
+- The pickup/dropoff_longitute/latitute this will show where the taxi pickup and drop off points are geographically (we will
+use this to plot a leaflet).
+
+- store_and_fwd_flag this is where the taxi ride was stored in memory because it couldn't connect to the server.
+
+- trip_duration: this is what we will be predicting in our final model and ultimately, what we will be looking at throughout
+the study.
+
+We check for missing values. This will allow for the assessment of the data; they indicate how much we don't have within our data. Additionally, we check this because many problems occur in modelling when missing values are present, either the rows which contain missing values will be removed or estimated. In our dataset, we are fortunate that we do not have any N/A values present.
+
+```{r, echo=FALSE, output=FALSE}
+## checking for n/a values in data set - none found. 
+sum(is.na(data_set))
+```
+
+## Reformating features
+
+In this section of the code, we use the mutate function to change the pickup and drop off DateTime variables and factor the vendor_id and passenger_count, we do this to allow easier visualisations of the relationships that these features.
+
+```{r, echo=T, results='hide'}
+
+## this is where i setup the variable for analysis. 
+data_set <- data_set %>%
+  mutate(pickup_datetime = dmy_hm(pickup_datetime),
+         dropoff_datetime = dmy_hm(dropoff_datetime),
+         vendor_id = factor(vendor_id),
+         passenger_count = factor(passenger_count))
+```
+
+# Data Features Analysis 
+
+## Feature visualisations
+
+Visualisation of the distributions of functions allows us to discover points in the dataset that are of specific interest these can then be studied in greater depth and to allow for a deeper interpretation of the data set through the packages that we have imported. We will pen up extra variables that we can explore by analysing datasets from different perspectives; this means that we can see a subtle trend and correlations. We start with a map of NYC and add a reasonable number of pickup coordinates and drop down the coordinates. We use the leaflet kit (https://rstudio.github.io/leaflet/) for this analysis, which includes An immersive diagram. Within this diagram, you can zoom in and rotate through the pickup and drop the positions throughout NYC.
+
+```{r,   out.width = '55%'}
+
+## add the image in because this is interactive it will be hard to show in a report. 
+knitr::include_graphics("DropOffPickUpNYC.JPG")
+set.seed(1234)
+
+##create a sample of the data.
+temp_change_data <- sample_n(data_set, 8e3)
+# Plot the pickup locations and the drop off locations
+maPlot1 <- leaflet(temp_change_data) %>% # initiate the leaflet instance
+    addTiles() %>%  #add map tiles - the default is openstreetmap
+    setView(-73.9, 40.75, zoom = 11) %>% 
+    addCircles(~pickup_longitude, ~pickup_latitude, weight = 1, radius=10, 
+                 color="red", stroke = TRUE, fillOpacity = 0.8) %>%
+    addCircles(~dropoff_longitude, ~dropoff_latitude, weight = 1, radius=10, 
+                 color="blue", stroke = TRUE, fillOpacity = 0.8) %>% 
+    addLegend("bottomright", colors= "blue", labels="Drop off Location", title="In New York City") %>%
+    addLegend("topright", colors= "red", labels="Pick up Location", title="In New York City") 
+maPlot1
+```
+We observe from the leaflet map that mostly all of our trips are in the Manhatten area. Another area of particular interest is JFK airport towards the south-east of the city. The map allows us to have some idea of the distribution of the drop-off and pickup locations. Let's take a look at the variable of particular interest in this analysis which is trip_duration.
+
+```{r, fig.height=1.5, fig.width=8}
+##creating histogram of the trip duration.
+data_set %>%
+  ggplot(aes(trip_duration)) +
+  geom_histogram(fill = "blue", bins = 250) +
+  scale_x_log10() +
+  scale_y_sqrt()
+```
+- The rides almost follow a normal distribution with a peak of nearly 27minutes(converted from seconds).
+- We can see that some of the rides which are of particular interest in the 10-second duration area.
+
+```{r, fig.height=1.5, fig.width=8}
+data_set %>%
+  filter(pickup_datetime > ymd("2016-01-20") & pickup_datetime < ymd("2016-02-10")) %>%
+  ggplot(aes(pickup_datetime)) +
+  geom_histogram(fill = "blue", bins = 250)
+```
+Plotting the pickup_datime shows us that there is a massive drop in pickups during the start of January, we will explore this more in the future sections when we add in the weather data.
+
+## Feature Engineering
+
+Feature engineering is the process of building new features from existing ones, trying to find better predictors so that we may use them in the XGboost algorithm at the end for our target variable (Brownlee, 2014). We define all the features of particular interest, which are distance, bearing, airport_coordinates, month, wday, hour, work_time_flag, airport_trip and then study them in the following sections. The coordinates for the airport where found on Wikipedia. We then defined that in a variable and
+used it (https://en.wikipedia.org/wiki/John_F._Kennedy_International_Airport). We can then refer back to the feature throughout the analysis.
+
+
+```{r, include=FALSE}
+
+##creating variable for jfk airport.
+airport_coordinates <- tibble(lon = -73.778889, lat = 40.639722)
+
+
+## assigning the pick up and drop of corords to a new dataframe.
+coordinates_for_pickup <- data_set %>%
+  select(pickup_longitude, pickup_latitude)
+coordinates_for_dropoff <- data_set %>%
+  select(dropoff_longitude, dropoff_latitude)
+data_set$dist <- distCosine(coordinates_for_pickup, coordinates_for_dropoff)
+data_set$bearing = bearing(coordinates_for_pickup, coordinates_for_dropoff)
+
+data_set$airport_pickup_distance_calc <- distCosine(coordinates_for_pickup, airport_coordinates)
+data_set$airport_dropoff_distance_calc <- distCosine(coordinates_for_dropoff, airport_coordinates)
+
+```
+```{r,  echo=T, results='hide'}
+## taking all the features that i believe to be relevant and putting them into the main dataframe so we can use them later in the model.
+data_set <- data_set %>%
+  mutate(velocity_speed = dist/trip_duration*3.6,
+         date = date(pickup_datetime),
+         month = month(pickup_datetime, label = TRUE),
+         wday = wday(pickup_datetime, label = TRUE, week_start = 1),
+         #wday = fct_relevel(wday, c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
+         hour = hour(pickup_datetime),
+         work_time_flag = (hour %in% seq(8,18)) & (wday %in% c("Mon","Tues","Wed","Thurs","Fri")),
+         airport_trip = (airport_pickup_distance_calc < 2e3) | (airport_dropoff_distance_calc < 2e3)
+         )
+```
+
+### Travel Speed 
+
+Distance divided by time is velocity, by calculating the average velocity of our taxi trip we will have another feature. This will be useful in the later stages of the analysis to find other features which could have predictive power, below is the distribution of the velocity_speed:
+
+```{r,fig.height=2}
+##getting the average velocity_speed graph. 
+data_set %>%
+  filter(velocity_speed > 2 & velocity_speed < 1e2) %>%
+  ggplot(aes(velocity_speed)) +
+  geom_histogram(fill = "blue", bins = 250) +
+  labs(x = "Average velocity_speed [km/h] (direct distance)")
+```
+In this graph we remove most values which are seen to be extreme values. The average velocity_speed of 15 km/h is observed which we can say sounds reasonable for NYC. Keeping in mind that this refers to the direct distance and the actual velocity would be much higher. We then investigate the average velocity_speed per day:
+```{r,  fig.height = 4, fig.width= 8}
+
+multiplot_plot_1 <- data_set %>%
+  group_by(wday, vendor_id) %>%
+  summarise(median_velocity_speed = median(velocity_speed)) %>%
+  ggplot(aes(wday, median_velocity_speed, color = vendor_id)) +
+  geom_point(size = 4) +
+  labs(x = "Day of the week", y = "Median velocity_speed [km/h]")
+
+multiplot_plot_2 <- data_set %>%
+  group_by(hour, vendor_id) %>%
+  summarise(median_velocity_speed = median(velocity_speed)) %>%
+  ggplot(aes(hour, median_velocity_speed, color = vendor_id)) +
+  geom_smooth(method = "loess", span = 1/2) +
+  geom_point(size = 4) +
+  labs(x = "Hour of the day", y = "Median velocity_speed [km/h]") +
+  theme(legend.position = "none")
+
+multiplot_plot_3 <- data_set %>%
+  group_by(wday, hour) %>%
+  summarise(median_velocity_speed = median(velocity_speed)) %>%
+  ggplot(aes(hour, wday, fill = median_velocity_speed)) +
+  geom_tile() +
+  labs(x = "Hour of the day", y = "Day of the week") +
+  scale_fill_distiller(palette = "Spectral")
+
+layout <- matrix(c(1,2,3,3),2,2,byrow=TRUE)
+multiplot(multiplot_plot_1, multiplot_plot_2, multiplot_plot_3, layout=layout)
+```
+- Taxis tend to travel faster on weekends and Mondays than in the middle of the week.
+- Early morning hours allow the journey quicker, for everything from 8 a.m. Around six o'clock. Only as long as that.
+- There is absolutely no gap between the two vendors.
+- Throughout the day the speed is much lower, We are assuming this is due to the working day, therefore, we create a new function, work time flag, which we define as 8am-6pm on Mon-Fri.
+
+### Weather Data
+
+We load the data set in from the CSV file and turn the date into a lubridate variable allowing us to work_time_flag with the date and times much easier. We also change the T which in the dataset means "Traces of" into numerical values "0.1" and save the min/max temperature. Once the weather data has been mutated and is cleaned, the data is then left joined to our main dataset so we can analyse the effect of weather on the taxi trips in NYC.
+
+```{r, echo=T, results='hide'}
+## using the dataset so i can setup the analysis of the weather vs duration and maybe find some interesting features that could be used.
+data_set_weather <- data_set_weather %>%
+  mutate(date = dmy(date),
+         rain = as.numeric(ifelse(precipitation == "T", "0.01", precipitation)),
+         s_fall = as.numeric(ifelse(`snow.fall` == "T", "0.01", `snow.fall`)),
+         s_depth = as.numeric(ifelse(`snow.depth` == "T", "0.01", `snow.depth`)),
+         all_precip = s_fall + rain,
+         flag_snow_present = (s_fall > 0) | (s_depth > 0),
+         flag_rain_present = rain > 0,
+         max_temp = `maximum.temperature`,
+         min_temp = `minimum.temperature`)
+```
+```{r}
+## lets select the data we want and dataset_combined_together it with the main dataset so we can use this later on.
+temp_change_data <- data_set_weather %>%
+  select(date, rain, s_fall, all_precip, flag_snow_present, flag_rain_present, s_depth, max_temp, min_temp)
+data_set1 <- left_join(data_set, temp_change_data, by = "date")
+```
+
+In the previous section, we discovered a gap in the taxi pickups in Jan, looking at the weather data in comparison the snowfall within that time frame would suggest that there was heavy snowfall between those dates which could be the main reason stopping the taxi drivers from obtaining pickups.
+
+
+```{r,fig.height=3, fig.width=8}
+
+
+Plot1 <- data_set1 %>%
+  group_by(date) %>%
+  count() %>%
+  ggplot(aes(date,n/1e3)) +
+  geom_line(size = 1.5, color = "red") +
+  labs(x = "", y = "Kilo trips per day")
+
+Plot2 <- data_set1 %>%
+  group_by(date) %>%
+  summarise(trips = n(),
+            snow_fall = mean(s_fall),
+            rain_fall = mean(rain),
+            all_precip = mean(all_precip)) %>%
+  ggplot(aes(date, snow_fall)) +
+  geom_line(color = "blue", size = 1.5) +
+  labs(x = "", y = "Snowfall") +
+  scale_y_sqrt() +
+  scale_x_date(limits = ymd(c("2015-12-28", "2016-06-30")))
+
+Plot3 <- data_set1 %>%
+  group_by(date) %>%
+  summarise(trips = n(),
+            snow_depth = mean(s_depth)) %>%
+  ggplot(aes(date, snow_depth)) +
+  geom_line(color = "purple", size = 1.5) +
+  labs(x = "", y = "Snow depth") +
+  scale_y_sqrt() +
+  scale_x_date(limits = ymd(c("2015-12-29", "2016-06-30")))
+
+Plot4 <- data_set1 %>%
+  group_by(date) %>%
+  summarise(median_velocity_speed = median(velocity_speed)) %>%
+  ggplot(aes(date, median_velocity_speed)) +
+  geom_line(color = "orange", size = 1.5) +
+  labs(x = "Date", y = "Median velocity_speed")
+
+layout <- matrix(c(1,2,3,4),4,1,byrow=FALSE)
+multiplot(Plot1, Plot2, Plot3, Plot4, layout=layout)
+```
+
+The graph shows quite a significant amount of snowfall during that period which had a huge impact on taxi lifts and traffic patterns as you can see the median velocity_speed slowed down enormously looking at the report for pure snowfall it doesn't conclude fully that it has a significant impact on the trip duration, however, we are going to add it to the model to investigate whether it has some interaction that we cannot see at the moment.
+
+## OSRM Data Analysis
+
+### Fastest Routes
+
+We then dataset_combined_together the OSRM data that we got from The Open Source Routing Machine (OSRM) is an open-source router designed for use with data from the OpenStreetMap project (https://cran.r-project.org/web/packages/osrm/osrm.pdf). We use this in the analysis to estimate the fastest route for each trip. The data includes the data street name of each pickup and drop-off location as well as the distance and duration that the OSRM package has estimated. The data consists of much more detailed variables such as the steps which the route has taken, for example, left/right turns and entering highways etc. which we can use to analyse the trip duration further. It should be noted in this analysis that the fastest route may not always be the shortest route between two points. It should be noted that the routes which have been calculated does not account for traffic and the fastest route on that particular instance may not be the fastest day by day. Ultimately the data will be used to calculate distance and duration of the trips to aid our end model.
+
+```{r, include=FALSE}
+## checking the data
+glimpse(OSRMDAT)
+```
+
+```{r, cache=FALSE, echo=T, results='hide'}
+
+## here we are making new features again from the dataset. we create some turning to see if it can be correlated to the trip duration?
+temp_change_data <- OSRMDAT %>%
+  select(id, total_distance, total_travel_time, number_of_steps,
+         step_direction, step_maneuvers) %>%
+  mutate(fastest_velocity_speed = total_distance/total_travel_time*3.6,
+         step_turn_left = str_count(step_direction, "left"),
+         step_turn_right = str_count(step_direction, "right"),
+         turns = str_count(step_maneuvers, "turn")
+         ) %>%
+  select(-step_direction, -step_maneuvers)
+```
+
+```{r}
+## lets join it to a new data set so we can use that to analyse with.
+OSRMDAT1 <- left_join(data_set1, temp_change_data, by = "id") %>%
+  mutate(fast_velocity_speed_trip = total_distance/trip_duration*3.6)
+```
+
+The data set which has been pulled from the OSRM tool that we created locally on a Linux machine and linked to Rstudio shows us that for each step alongside a detailed account of the distance_per_step, travel_time_per_step, and the step_maneuvers and step_direction describing the journey. The direction of the turning step is listed in the step_directions variable within the dataset, which will be useful for when analysing whether more left/right turns have been taken. The total distance is measured in meters and the duration in seconds, this function can be reviewed in more detail on how to obtain the detail see (http://project-osrm.org/docs/v5.10.0/api/#routestep-object).
+
+```{r, fig.height = 3, cache=FALSE}
+multiplot_plot_1 <- OSRMDAT1 %>%
+  ggplot(aes(total_travel_time)) +
+  geom_histogram(bins = 150, fill = "red") +
+  scale_x_log10() +
+  scale_y_sqrt()
+
+multiplot_plot_2 <- OSRMDAT1 %>%
+  ggplot(aes(total_distance)) +
+  geom_histogram(bins = 150, fill = "red") +
+  scale_x_log10() +
+  scale_y_sqrt()
+
+multiplot_plot_3 <- OSRMDAT1 %>%
+  ggplot(aes(number_of_steps)) +
+  geom_bar(fill = "red")
+
+multiplot_plot_4 <- OSRMDAT1 %>%
+  ggplot(aes(total_distance, total_travel_time)) +
+  geom_bin2d(bins = c(80,80))
+
+layout <- matrix(c(1,2,3,4,4,4),2,3,byrow=TRUE)
+multiplot(multiplot_plot_1, multiplot_plot_2, multiplot_plot_3, multiplot_plot_4, layout=layout)
+```
+In the graphs above, it can be observed that the travel time and distance are roughly 5mins and 2800 meters. The most frequent number of steps throughout a journey is 5. Due to the variables departure and arrival being in the dataset, the steps are never below 2. Many of the trips at least 60 thousand contain 2 steps, which could suggest that they are travelling in one direct distance or a straight line.
+
+```{r,  fig.height = 3, cache=FALSE}
+multiplot_plot_1 <- temp_change_data %>%
+  ggplot(aes(factor(step_turn_left), total_travel_time, color = factor(step_turn_left))) +
+  geom_boxplot() +
+  labs(x = "Number of left turns") +
+  theme(legend.position = "none")
+
+multiplot_plot_2 <- temp_change_data %>%
+  ggplot(aes(factor(step_turn_right), total_travel_time, color = factor(step_turn_right))) +
+  geom_boxplot() +
+  labs(x = "Number of right turns") +
+  theme(legend.position = "none")
+
+multiplot_plot_3 <- temp_change_data %>%
+  ggplot(aes(factor(turns), total_travel_time, color = factor(turns))) +
+  geom_boxplot() +
+  labs(x = "Total number of turns") +
+  theme(legend.position = "none")
+
+layout <- matrix(c(1,2,3,3),2,2,byrow=TRUE)
+multiplot(multiplot_plot_1, multiplot_plot_2, multiplot_plot_3, layout=layout)
+```
+
+### Trip Duration Vs Total Time Taken
+Investigating the OSRM data of the total_travel_time variable to the trip_duration in the original data will allow us to gain a broader understanding of why in some cases the time decreases and trying to predict or classify these decreases in duration, these incremental decreases may suggest some delays in our data, for example, heavy traffic throughout NYC. The data has been filtered whereby the total_travel_time has to be greater than 50, and less than 2000 and a new variable was created whereby the time taken is above the 1e4 mark and set to variable duration_time_delay = true.
+```{r, fig.height = 3, cache=FALSE}
+
+temp_change_data <- OSRMDAT1 %>%
+  filter(total_travel_time < 10) %>%
+  mutate(duration_time_delay = trip_duration > 600)
+
+multiplot_plot_1 <- temp_change_data %>%
+  ggplot(aes(vendor_id, group = duration_time_delay)) +
+  geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+  scale_y_continuous(labels=scales::percent) +
+  ylab("relative frequencies") +
+  facet_grid(~duration_time_delay) +
+  theme(legend.position = "none")
+
+multiplot_plot_2 <- temp_change_data %>%
+  ggplot(aes(airport_trip, group = duration_time_delay)) +
+  geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+  scale_y_continuous(labels=scales::percent) +
+  ylab("relative frequencies") +
+  facet_grid(~duration_time_delay) +
+  theme(legend.position = "none")
+
+multiplot_plot_4 <- temp_change_data %>%
+  ggplot(aes(work_time_flag, group = duration_time_delay)) +
+  geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+  scale_y_continuous(labels=scales::percent) +
+  ylab("relative frequencies") +
+  facet_grid(~duration_time_delay) +
+  theme(legend.position = "none")
+
+multiplot_plot_5 <- temp_change_data %>%
+  ggplot(aes(total_distance, fill = duration_time_delay)) +
+  geom_density(alpha = 0.5)
+
+layout <- matrix(c(1,2,3,4,5,5),2,3,byrow=TRUE)
+multiplot(multiplot_plot_1, multiplot_plot_2, multiplot_plot_3, multiplot_plot_4, multiplot_plot_5, layout=layout)
+```
+Mostly all long duration time delays occur for vendor id 2, which might suggest that this vendor takes a longer route compared to vendor id 1. The long duration time delay sample reveals that JFK trips have a slightly higher performance. We might claim that a ride to the airport can entail waiting time for a flight, or the roads are getting worse off and into the airport. The proportion of duration time delays during work time flag hours is marginally higher but not of real importance. However, in the long-term time delay distribution, long distances are obviously favoured to shorter ones. Note that we're just contrasting trips within the same span of total travel time (50-2000 s). Furthermore, it is not seen here that long duration time delays tend to be marginally more common on Tuesdays or in January and March than on Wednesdays and Thursdays or February. However, given the number of categories and the fact that the variations at most exceed 5 percentage points, such results might be spontaneous.
+
+## Classification of Data
+
+In a classification function, each individual or condition where we would like to make a decision is called an inference, and the classification question was visualised by the use of an alluvial plot (Scott, 2019). Made accessible in an alluvial bundle, demonstrating how the goal groups apply to various distinct functions. (https://cran.r-project.org/web/packages/alluvial/vignettes/alluvial.html).
+
+```{r, cache=FALSE ,echo=T, results='hide'}
+## lets create a new dataframe containing whether the trip is fast/slow/medium duration.
+Classification_dataset <- OSRMDAT1 %>%
+  mutate(classfiication_of_speed = case_when(trip_duration < 3e2 ~ "fast",
+                            trip_duration >= 3e2 & trip_duration <= 1.6e3 ~ "mid",
+                            trip_duration > 1.6e3 ~ "slow"))
+```
+
+```{r, fig.height=2.5, cache=FALSE}
+
+## remove the mid time i just really wanna see whether its fast or slow. 
+Classification_dataset <- Classification_dataset %>%
+  filter(classfiication_of_speed != "mid")
+
+allu_training_data_set <- Classification_dataset %>%
+  group_by(classfiication_of_speed, work_time_flag, wday, airport_trip) %>%
+  count() %>%
+  ungroup
+  
+alluvial(allu_training_data_set %>% select(-n),
+         freq=allu_training_data_set$n, border=NA,
+         col=ifelse(allu_training_data_set$classfiication_of_speed == "fast", "red", "blue"),
+         cex=0.75,
+         hide = allu_training_data_set$n < 150,
+         ordering = list(
+           order(allu_training_data_set$classfiication_of_speed=="fast"),
+           NULL,
+           NULL,
+           NULL))
+```
+In this plot, the vertical sizes of the blocks and the widths of the stripes (called "alluvia") are proportional to the frequency. Here, we see how the fast vs slow groups fan out into the different categories.
+
+- The majority of the trips which are not within the working day time frame are fast trips this can be seen through the large
+proportion of alluvia.
+- In terms of whether the fast trips are during the week vs weekends we can see that the weekends have a higher proportion
+of faster trips. This graph also allows us to sanity check the data through work = false in the weekend days shown.
+- Airport trips in the graph show a large number of slow trips.
+
+## Correlation of Data overview
+Before we use the data which contains all of the new features for the modelling, we will visualise the relations between ourparameters using a correlation matrix. For this, we need to change all the input features into a numerical format. Shown below, are the colour-coded correlation coefficients for each combination of the features which are present within the combined dataset. In simplest terms: this shows whether features are connected so that one changes with a predictable trend if you change the other. The closer this coefficient is to zero, the weaker is the correlation. Both 1 and -1 are the ideal cases of perfect correlation and anti-correlation (dark blue and dark red in the plots below).
+
+Here, we are interested if and how strongly our correlate with the trip_duration, the prediction of which is the ultimate goal of this challenge. But we also want to know whether our potential predictors are correlated among each other, so that we can reduce the collinearity in our data set and improve the robustness of our prediction.
+
+```{r fig.height=3.5, cache=FALSE}
+temp_change_data <- OSRMDAT1 %>%
+  select(-id, -pickup_datetime, -dropoff_datetime, -airport_pickup_distance_calc,
+         -airport_dropoff_distance_calc,  -date,
+         -store_and_fwd_flag, -hour, -rain, -s_fall, -all_precip,
+         -flag_rain_present, -s_depth, -min_temp, -max_temp,
+         -wday, -step_turn_right, -turns, -fast_velocity_speed_trip, -flag_snow_present) %>%
+  mutate(passenger_count = as.integer(passenger_count),
+         vendor_id = as.integer(vendor_id),
+         airport_trip = as.integer(airport_trip),
+         month = as.integer(month),
+         work_time_flag = as.integer(work_time_flag)) %>%
+  select(trip_duration, velocity_speed, everything())
+
+temp_change_data %>%
+  cor(use="complete.obs", method = "spearman") %>%
+  corrplot(type="lower", method="circle", diag=FALSE)
+```
+The correlations which show the trip_duration are the distance directly related to the journey, the total distance travel and the travel time these are all variable we obtained through the OSRM data set. Each of these variables is highly correlated with one another and have a high impact on the trip_duration.
+
+# Machine Learning - Simple Model and Predictions
+ 
+## Preparation of Data
+
+In this section of the report, we will feed our exploratory and feature engineered variables into a simple XGboost model to prediction_data the trip_duration and compare. However, this section leaves a lot of room for improvement as various algorithms can be used in the optimisations and modelling.
+
+This is another consistency check. We could have done this before the exploration, but my personal preference is to examine the training_data_seting data first before looking at the testing_data_set so that our analysis is as unbiased as possible.
+```{r,  fig.height=2, cache=FALSE}
+## here we create the testing_data_set and training_data_set datasets for the purpose of the modelling.
+test_idx = sample(dim(data_set)[1], round(nrow(data_set)*0.75))
+training_data_set = data_set[-test_idx, ]
+testing_data_set = data_set[test_idx, ]
+```
+```{r, fig.height=2, fig.width=8, cache=FALSE}
+
+## we dataset_combined_together them together into a new dataframe so we dont damage the original data set we created.
+dataset_combined_together <- bind_rows(training_data_set %>% mutate(dset = "training_data_set"), 
+                     testing_data_set %>% mutate(dset = "testing_data_set",
+                                     dropoff_datetime = NA,
+                                     trip_duration = NA))
+dataset_combined_together <- dataset_combined_together %>% mutate(dset = factor(dset))
+
+
+temp_change_data <- dataset_combined_together %>%
+  mutate(date = date(ymd_hms(pickup_datetime))) %>%
+  group_by(date, dset) %>%
+  count() %>%
+  ungroup()
+temp_change_data %>%
+  ggplot(aes(date, n/1e3, color = dset)) +
+  geom_line(size = 1.5) +
+  labs(x = "", y = "Kilo trips per day")
+```
+
+### Formatting of data
+In this section, we format the selected features to transform them into integer columns, as many classifiers can not handle categorical values. We use our exploratory experience for encoding, including the experiences obtained from our classification excursion. We build training_data_set and check data sets from the data frame we have adapted to incorporate additional dataset variables.
+
+In the dataset, not every variable will be useful in predicting the trip duration. Here we just have relevant variables and exclude, for example, the id feature. In theory, we should use all the features in the dataset and enable the collection of such features to be alogorithm-modelling. For comparison in the modelling function collection, it is normal practice to step-by-step introduce or delete features depending on testing_data_set performance. Due to the repeatability of the results, we have opted to add one
+model fitting phase, namely the features we identified in our exploratory data analysis and final correlation matrix. This is a section in the study that could be significantly strengthened, whereby a more thorough feature selection process could be applied.
+
+```{r, cache=FALSE}
+## this whole process is literally a repeat of what we have done before. just a sanity check to what features we actually have in the dataset.
+
+airport_coordinates <- tibble(lon = -73.778889, lat = 40.639722)
+
+
+# derive distances
+coordinates_for_pickup <- dataset_combined_together %>%
+  select(pickup_longitude, pickup_latitude)
+coordinates_for_dropoff <- dataset_combined_together %>%
+  select(dropoff_longitude, dropoff_latitude)
+dataset_combined_together$dist <- distCosine(coordinates_for_pickup, coordinates_for_dropoff)
+dataset_combined_together$bearing = bearing(coordinates_for_pickup, coordinates_for_dropoff)
+
+dataset_combined_together$airport_pickup_distance_calc <- distCosine(coordinates_for_pickup, airport_coordinates)
+dataset_combined_together$airport_dropoff_distance_calc <- distCosine(coordinates_for_dropoff, airport_coordinates)
+
+
+# add dates
+dataset_combined_together <- dataset_combined_together %>%
+  mutate(pickup_datetime = ymd_hms(pickup_datetime),
+         dropoff_datetime = ymd_hms(dropoff_datetime),
+         date = date(pickup_datetime)
+  )
+
+# add weather info
+temp_change_data <- data_set_weather %>%
+  select(date, rain, s_fall, all_precip, flag_snow_present, flag_rain_present, s_depth, max_temp, min_temp)
+dataset_combined_together <- left_join(dataset_combined_together, temp_change_data, by = "date")
+
+# add fast routes
+temp_change_data <- OSRMDAT %>%
+  select(id, total_distance, total_travel_time, number_of_steps,
+         step_direction, step_maneuvers) %>%
+  mutate(fastest_velocity_speed = total_distance/total_travel_time*3.6,
+         step_turn_left = str_count(step_direction, "left"),
+         step_turn_right = str_count(step_direction, "right"),
+         turns = str_count(step_maneuvers, "turn")
+         ) %>%
+  select(-step_direction, -step_maneuvers)
+dataset_combined_together <- left_join(dataset_combined_together, temp_change_data, by = "id")
+
+# reformat to numerical and recode levels
+dataset_combined_together <- dataset_combined_together %>%
+  mutate(store_and_fwd_flag = as.integer(factor(store_and_fwd_flag)),
+         vendor_id = as.integer(vendor_id),
+         month = as.integer(month(pickup_datetime)),
+         hour = hour(pickup_datetime),
+         wday = wday(pickup_datetime, label = TRUE, abbr = TRUE),
+         work_time_flag = as.integer( (hour %in% seq(8,18)) & (wday %in% c("Mon","Tue","Fri","Wed","Thu")) ),
+         wday = as.integer(fct_relevel(wday, c("Sun", "Sat", "Mon", "Tue", "Wed", "Thu", "Fri"))),
+         airport_trip = as.integer( (airport_pickup_distance_calc < 2e3) | (airport_dropoff_distance_calc < 2e3) ),
+         flag_rain_present = as.integer(flag_rain_present),
+         flag_snow_present = as.integer(flag_snow_present)
+          )
+         
+```
+In this code block, the feature selection is structured with a little more detail than necessary, in order to make it easier to generalise it to a new problem:
+```{r, cache=FALSE}
+
+# engineered features!
+training_data_set_cols <- c("total_travel_time", "total_distance", "hour", "dist",
+                "vendor_id", "airport_trip", "wday", "month",
+                "pickup_longitude", "pickup_latitude", "bearing" )
+# What we are planning to predict!
+target_variable <- c("trip_duration")
+# ID variable
+list_of_id_variables <- c("id") 
+# Features mapping
+other_collumns <- c("dset")
+# cleaning features
+calculations_airport_cleaned <- c("airport_dropoff_distance_calc", "airport_pickup_distance_calc")
+
+##getting ID's
+testing_data_id_extract <- dataset_combined_together %>%
+  filter(dset == "testing_data_set") %>%
+  select_(.dots = list_of_id_variables)
+```
+
+```{r, cache=FALSE}
+# all relevant columns for training_data_set/testing_data_set
+cols <- c(training_data_set_cols, target_variable, other_collumns, calculations_airport_cleaned)
+dataset_combined_together <- dataset_combined_together %>%
+  select_(.dots = cols)
+
+# split training_data_set/testing_data_set
+training_data_set <- dataset_combined_together %>%
+  filter(dset == "training_data_set") %>%
+  select_(.dots = str_c("-",c(other_collumns)))
+testing_data_set <- dataset_combined_together %>%
+  filter(dset == "testing_data_set") %>%
+  select_(.dots = str_c("-",c(other_collumns, calculations_airport_cleaned, target_variable)))
+
+
+
+dataset_combined_together %>% write_csv('submit.csv')
+
+#---------------------------------
+```
+
+```{r}
+training_data_set <- training_data_set %>%
+  mutate(trip_duration = log(trip_duration + 1))
+```
+
+```{r}
+set.seed(4321)
+training_data_setIndex <- createDataPartition(training_data_set$trip_duration, p = 0.8, list = FALSE, times = 1)
+
+training_data_set <- training_data_set[training_data_setIndex,]
+valid <- training_data_set[-training_data_setIndex,]
+```
+```{r}
+valid <- valid %>%
+  select_(.dots = str_c("-",c(calculations_airport_cleaned)))
+  
+training_data_set <- training_data_set %>%
+  filter(trip_duration < 24*3600,
+         airport_pickup_distance_calc < 3e5 & airport_dropoff_distance_calc < 3e5
+         ) %>%
+  select_(.dots = str_c("-",c(calculations_airport_cleaned)))
+```
+```{r, cache=FALSE}
+#convert to XGB matrix
+temp_change_data <- training_data_set %>% select(-trip_duration)
+temp_change_data2 <- valid %>% select(-trip_duration)
+
+model_training_data <- xgb.DMatrix(as.matrix(temp_change_data),label = training_data_set$trip_duration)
+model_valid_data <- xgb.DMatrix(as.matrix(temp_change_data2),label = valid$trip_duration)
+model_test_data <- xgb.DMatrix(as.matrix(testing_data_set))
+```
+
+```{r, cache=FALSE, echo=T, results='hide'}
+xgb_params <- list(colsample_bytree = 0.7, #variables per tree 
+                   subsample = 0.7, #data subset per tree 
+                   booster = "gbtree",
+                   max_depth = 5, #tree levels
+                   eta = 0.3, #shrinkage
+                   eval_metric = "rmse", 
+                   objective = "reg:linear",
+                   seed = 4321
+                   )
+
+watchlist <- list(train=model_training_data, valid=model_valid_data)
+```
+
+```{r, cache=FALSE, echo=T, results='hide'}
+set.seed(4321)
+Model_Trained_XGBoost <- xgb.train(params = xgb_params,
+                   data = model_training_data,
+                   print_every_n = 5,
+                   watchlist = watchlist,
+                   nrounds = 100)
+```
+The evaluation metric is RMSLE, the Root Mean Squared Logarithmic Error. Essentially, this means that we are optimising the prediction vs data deviations in log space. This has the advantage that large individual outliers don't get as much weight as they would in a linear metric (Garmsiri, 2018).
+
+In order to perform a test on how well our model generalises, we must conduct a cross-validation phase and also separate our combined data into training, validation and test data collection. The output of the model will, therefore, be tested on a sample that the algorithm has not seen before, i.e. the test data which we have separated out. We broke our data into 80/20 fractions using the caret package tool. Caret is a multi-purpose ML kit (https://cran.r-project.org/web/packages/caret/caret.pdf). We
+then train our model using the training data set out. To ensure reproducibility we set an R seed here, we will restrict the learning to 50 sample rounds for reproducibility purposes as the more rounds you add, the longer the model will train. After the fitting, we are running 5-fold cross-validation (CV) to estimate our model's performance.
+
+```{r, cache=FALSE,echo=T, results='hide'}
+xgb_cv <- xgb.cv(xgb_params,model_training_data,early_stopping_rounds = 10, nfold = 5, nrounds=25)
+```
+
+## Feature Importance
+After training we will check which features are the most important for our model. This will then allow us to create an iterative process whereby the significant features can be selected step by step for a model. Here we will simply visualise these features in order of importance:
+```{r, cache=FALSE}
+importance_variable_mat <- as.tibble(xgb.importance(feature_names = colnames(training_data_set %>% select(-trip_duration)), model = Model_Trained_XGBoost))
+```
+
+```{r, fig.height=2.5}
+importance_variable_mat %>%
+  ggplot(aes(reorder(Feature, Gain, FUN = max), Gain, fill = Feature)) +
+  geom_col() +
+  coord_flip() +
+  theme(legend.position = "none") +
+  labs(x = "Features", y = "Importance")
+```
+## Prediction
+Once we have got a CV score that is optimal, we use the corresponding model to make a prediction for the test data which the model has not been trained against.
+```{r, cache=FALSE,echo=T, results='hide'}
+Prediction_for_testset <- predict(Model_Trained_XGBoost,model_test_data)
+Prediction_From_Model <- testing_data_id_extract %>%
+  mutate(trip_duration = exp(Prediction_for_testset) - 1)
+```
+
+```{r, fig.height=2.5}
+temp_change_data <- training_data_set %>%
+  select(trip_duration) %>%
+  mutate(dset = "training_data_set",
+         trip_duration = exp(trip_duration) - 1)
+temp_change_data2 <- Prediction_From_Model %>%
+  mutate(dset = "prediction_data")
+
+bind_rows(temp_change_data, temp_change_data2) %>%
+  ggplot(aes(trip_duration, fill = dset)) +
+  geom_density(alpha = 0.5) +
+  scale_x_log10()
+```
+
+It can be observed that the model over predicts for the trip duration in comparison to the training_data_seting. The model can be improved in numerous ways to provide a more accurate end result. Firstly, running the CV for a larger number of rounds will immediately improve the model. Adding further features into the model through more analysis will allow the model to perform better overall, finally tweaking the parameters of the model to see the effect of the CV score could have been investigated.
+
+
+\newpage
+
+# Bibliography
+Patil, P. (2018). What Is Exploratory Data Analysis? [online] Towards Data Science. Available at: https://towardsdatascience.com/exploratory-data-analysis-8fc1cb20fd15.
+\par 
+Brownlee, J. (2014). Discover Feature Engineering, How to Engineer Features and How to Get Good at It. [online] Machine Learning Mastery. Available at: https://machinelearningmastery.com/discover-feature-engineering-how-to-engineer-features-and-how-to-get-good-at-it/.
+\par
+Scott, N. (2019). Data Science Roles: a Classification Problem. [online] Medium. Available at: https://towardsdatascience.com/data-science-roles-a-classification-problem-ebe6fae10169 [Accessed 28 May 2020].
+\par
+Garmsiri, S. (2018). Art of Choosing Metrics in Supervised Models Part 1. [online] Medium. Available at: https://towardsdatascience.com/art-of-choosing-metrics-in-supervised-models-part-1-f960ae46902e [Accessed 29 May 2020].
+
